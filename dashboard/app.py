@@ -203,9 +203,9 @@ def dashboard_overview():
     col1, col2, col3, col4 = st.columns(4)
     
     total_transactions = len(df)
-    fraud_count = df['is_fraud'].sum()
+    fraud_count = df['is_fraud'].sum() if 'is_fraud' in df.columns else 0
     fraud_rate = (fraud_count / total_transactions * 100) if total_transactions > 0 else 0
-    total_amount = df['amount'].sum()
+    total_amount = df['amount'].sum() if 'amount' in df.columns and pd.api.types.is_numeric_dtype(df['amount']) else 0
     
     with col1:
         st.markdown(f"""
@@ -261,20 +261,23 @@ def dashboard_overview():
         st.plotly_chart(fig_pie, use_container_width=True)
     
     with col2:
-        st.subheader("💰 Transaction Amount Distribution")
-        fig_hist = px.histogram(df, x='amount', color='is_fraud',
-                               color_discrete_map={0: '#2ecc71', 1: '#e74c3c'},
-                               nbins=50, title="Amount Distribution by Fraud Status",
-                               marginal='box')
-        fig_hist.update_layout(
-            paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)',
-            font=dict(size=14)
-        )
-        st.plotly_chart(fig_hist, use_container_width=True)
+        if 'amount' in df.columns and 'is_fraud' in df.columns and pd.api.types.is_numeric_dtype(df['amount']):
+            st.subheader("💰 Transaction Amount Distribution")
+            fig_hist = px.histogram(df, x='amount', color='is_fraud',
+                                   color_discrete_map={0: '#2ecc71', 1: '#e74c3c'},
+                                   nbins=50, title="Amount Distribution by Fraud Status",
+                                   marginal='box')
+            fig_hist.update_layout(
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                font=dict(size=14)
+            )
+            st.plotly_chart(fig_hist, use_container_width=True)
+        else:
+            st.info("Amount distribution chart not available - missing required columns")
     
     # Time-based analysis with enhanced visualization
-    if 'timestamp' in df.columns:
+    if 'timestamp' in df.columns and 'is_fraud' in df.columns:
         st.subheader("📅 Transaction Timeline")
         df['timestamp'] = pd.to_datetime(df['timestamp'])
         df['date'] = df['timestamp'].dt.date
@@ -414,22 +417,34 @@ def transaction_analysis():
     
     col1, col2, col3 = st.columns(3)
     
+    # Ensure amount column exists and is numeric
+    if 'amount' in df.columns and pd.api.types.is_numeric_dtype(df['amount']):
+        max_amount_value = float(df['amount'].max())
+        min_amount_value = 0.0
+    else:
+        max_amount_value = 1000.0
+        min_amount_value = 0.0
+    
     with col1:
-        min_amount = st.slider("💰 Minimum Amount", min_value=0.0, max_value=float(df['amount'].max()), value=0.0, step=10.0)
+        min_amount = st.slider("💰 Minimum Amount", min_value=min_amount_value, max_value=max_amount_value, value=min_amount_value, step=10.0)
     
     with col2:
-        max_amount = st.slider("💰 Maximum Amount", min_value=0.0, max_value=float(df['amount'].max()), value=float(df['amount'].max()), step=10.0)
+        max_amount = st.slider("💰 Maximum Amount", min_value=min_amount_value, max_value=max_amount_value, value=max_amount_value, step=10.0)
     
     with col3:
         fraud_filter = st.selectbox("🚨 Filter by Fraud Status", ["All", "Legitimate", "Fraudulent"])
     
-    # Apply filters
-    filtered_df = df[(df['amount'] >= min_amount) & (df['amount'] <= max_amount)]
+    # Apply filters - only if amount column exists
+    if 'amount' in df.columns and pd.api.types.is_numeric_dtype(df['amount']):
+        filtered_df = df[(df['amount'] >= min_amount) & (df['amount'] <= max_amount)]
+    else:
+        filtered_df = df.copy()
     
-    if fraud_filter == "Legitimate":
-        filtered_df = filtered_df[filtered_df['is_fraud'] == 0]
-    elif fraud_filter == "Fraudulent":
-        filtered_df = filtered_df[filtered_df['is_fraud'] == 1]
+    if 'is_fraud' in df.columns:
+        if fraud_filter == "Legitimate":
+            filtered_df = filtered_df[filtered_df['is_fraud'] == 0]
+        elif fraud_filter == "Fraudulent":
+            filtered_df = filtered_df[filtered_df['is_fraud'] == 1]
     
     # Display results with colored indicators
     st.subheader(f"📋 Filtered Transactions ({len(filtered_df)} records)")
@@ -450,56 +465,63 @@ def transaction_analysis():
         st.subheader("🌍 Transactions by Location")
         location_counts = df['location'].value_counts().head(20)
         
-        # Colorful bar chart
-        colors = ['#667eea', '#764ba2', '#f093fb', '#4facfe', '#ff6b6b', '#feca57', '#48dbfb', '#ff9ff3']
-        fig_location = px.bar(x=location_counts.index, y=location_counts.values,
-                            title='Top 20 Locations by Transaction Count',
-                            labels={'x': 'Location', 'y': 'Transaction Count'},
-                            color=location_counts.values,
-                            color_continuous_scale='Viridis',
-                            text=location_counts.values,
-                            text_template='%{y}')
-        fig_location.update_traces(textposition='outside')
-        fig_location.update_layout(
-            paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)',
-            font=dict(size=14),
-            showlegend=False
-        )
-        st.plotly_chart(fig_location, use_container_width=True)
+        if len(location_counts) > 0:
+            # Colorful bar chart
+            colors = ['#667eea', '#764ba2', '#f093fb', '#4facfe', '#ff6b6b', '#feca57', '#48dbfb', '#ff9ff3']
+            fig_location = px.bar(x=location_counts.index, y=location_counts.values,
+                                title='Top 20 Locations by Transaction Count',
+                                labels={'x': 'Location', 'y': 'Transaction Count'},
+                                color=location_counts.values,
+                                color_continuous_scale='Viridis',
+                                text=location_counts.values,
+                                text_template='%{y}')
+            fig_location.update_traces(textposition='outside')
+            fig_location.update_layout(
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                font=dict(size=14),
+                showlegend=False
+            )
+            st.plotly_chart(fig_location, use_container_width=True)
+        else:
+            st.info("No location data available")
     
     # Device analysis with enhanced visualization
     if 'device' in df.columns:
         st.subheader("📱 Transactions by Device")
         device_counts = df['device'].value_counts()
         
-        # Colorful pie chart
-        device_colors = ['#667eea', '#764ba2', '#f093fb', '#4facfe', '#ff6b6b']
-        fig_device = px.pie(values=device_counts.values, names=device_counts.index,
-                           title='Transaction Distribution by Device',
-                           hole=0.4,
-                           color_discrete_sequence=device_colors)
-        fig_device.update_traces(textposition='inside', textinfo='percent+label')
-        fig_device.update_layout(
+        if len(device_counts) > 0:
+            # Colorful pie chart
+            device_colors = ['#667eea', '#764ba2', '#f093fb', '#4facfe', '#ff6b6b']
+            fig_device = px.pie(values=device_counts.values, names=device_counts.index,
+                               title='Transaction Distribution by Device',
+                               hole=0.4,
+                               color_discrete_sequence=device_colors)
+            fig_device.update_traces(textposition='inside', textinfo='percent+label')
+            fig_device.update_layout(
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                font=dict(size=14)
+            )
+            st.plotly_chart(fig_device, use_container_width=True)
+        else:
+            st.info("No device data available")
+    
+    # Interactive amount range visualization - only if amount column exists
+    if 'amount' in df.columns and 'is_fraud' in df.columns and pd.api.types.is_numeric_dtype(df['amount']):
+        st.subheader("💵 Amount Range Analysis")
+        fig_amount = px.box(df, x='is_fraud', y='amount', 
+                           color='is_fraud',
+                           color_discrete_map={0: '#2ecc71', 1: '#e74c3c'},
+                           title='Amount Distribution by Fraud Status',
+                           labels={'is_fraud': 'Fraud Status', 'amount': 'Transaction Amount'})
+        fig_amount.update_layout(
             paper_bgcolor='rgba(0,0,0,0)',
             plot_bgcolor='rgba(0,0,0,0)',
             font=dict(size=14)
         )
-        st.plotly_chart(fig_device, use_container_width=True)
-    
-    # Interactive amount range visualization
-    st.subheader("💵 Amount Range Analysis")
-    fig_amount = px.box(df, x='is_fraud', y='amount', 
-                       color='is_fraud',
-                       color_discrete_map={0: '#2ecc71', 1: '#e74c3c'},
-                       title='Amount Distribution by Fraud Status',
-                       labels={'is_fraud': 'Fraud Status', 'amount': 'Transaction Amount'})
-    fig_amount.update_layout(
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-        font=dict(size=14)
-    )
-    st.plotly_chart(fig_amount, use_container_width=True)
+        st.plotly_chart(fig_amount, use_container_width=True)
 
 def fraud_alerts():
     st.header("⚠️ Fraud Alerts")
@@ -528,7 +550,7 @@ def fraud_alerts():
         """, unsafe_allow_html=True)
     
     with col2:
-        high_risk = (alerts_df['fraud_probability'] > 0.9).sum()
+        high_risk = (alerts_df['fraud_probability'] > 0.9).sum() if 'fraud_probability' in alerts_df.columns else 0
         st.markdown(f"""
         <div class="metric-card" style="background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%);">
             <h3 style="margin:0; font-size:1.2rem;">High Risk Alerts</h3>
@@ -537,7 +559,7 @@ def fraud_alerts():
         """, unsafe_allow_html=True)
     
     with col3:
-        avg_prob = alerts_df['fraud_probability'].mean()
+        avg_prob = alerts_df['fraud_probability'].mean() if 'fraud_probability' in alerts_df.columns else 0
         st.markdown(f"""
         <div class="metric-card" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
             <h3 style="margin:0; font-size:1.2rem;">Avg Fraud Probability</h3>
@@ -560,34 +582,39 @@ def fraud_alerts():
             
             col1, col2, col3 = st.columns(3)
             with col1:
-                st.metric("💰 Amount", f"${row['amount']:.2f}")
+                st.metric("💰 Amount", f"${row.get('amount', 0):.2f}")
             with col2:
-                st.metric("📍 Location", row['location'])
+                st.metric("📍 Location", row.get('location', 'N/A'))
             with col3:
-                st.metric("🎯 Fraud Probability", f"{row['fraud_probability']:.2%}")
+                st.metric("🎯 Fraud Probability", f"{row.get('fraud_probability', 0):.2%}")
             
             st.markdown("</div>", unsafe_allow_html=True)
     
     # Alert timeline with enhanced visualization
     st.subheader("📊 Alert Timeline")
-    alerts_df['timestamp'] = pd.to_datetime(alerts_df['timestamp'])
-    alerts_by_hour = alerts_df.groupby(alerts_df['timestamp'].dt.hour).size()
+    if 'timestamp' in alerts_df.columns:
+        alerts_df['timestamp'] = pd.to_datetime(alerts_df['timestamp'])
+        alerts_by_hour = alerts_df.groupby(alerts_df['timestamp'].dt.hour).size()
+    else:
+        st.info("Timeline not available - timestamp column missing")
+        alerts_by_hour = pd.Series()
     
-    fig_timeline = px.line(x=alerts_by_hour.index, y=alerts_by_hour.values,
-                         title='Alerts by Hour of Day',
-                         labels={'x': 'Hour', 'y': 'Number of Alerts'},
-                         line_shape='spline',
-                         markers=True)
-    fig_timeline.update_traces(line=dict(color='#667eea', width=3), marker=dict(size=8))
-    fig_timeline.update_layout(
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-        font=dict(size=14)
-    )
-    fig_timeline.add_hrect(y0=0, y1=alerts_by_hour.max(), 
-                          fillcolor="rgba(102, 126, 234, 0.1)", 
-                          layer="below", line_width=0)
-    st.plotly_chart(fig_timeline, use_container_width=True)
+    if len(alerts_by_hour) > 0:
+        fig_timeline = px.line(x=alerts_by_hour.index, y=alerts_by_hour.values,
+                             title='Alerts by Hour of Day',
+                             labels={'x': 'Hour', 'y': 'Number of Alerts'},
+                             line_shape='spline',
+                             markers=True)
+        fig_timeline.update_traces(line=dict(color='#667eea', width=3), marker=dict(size=8))
+        fig_timeline.update_layout(
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            font=dict(size=14)
+        )
+        fig_timeline.add_hrect(y0=0, y1=alerts_by_hour.max(), 
+                              fillcolor="rgba(102, 126, 234, 0.1)", 
+                              layer="below", line_width=0)
+        st.plotly_chart(fig_timeline, use_container_width=True)
 
 def model_training():
     st.header("⚙️ Model Training")
@@ -601,16 +628,34 @@ def model_training():
     # Preprocessing options with enhanced UI
     st.subheader("🔧 Data Preprocessing")
     
+    # Get available categorical columns
+    available_categorical = df.select_dtypes(include=['object']).columns.tolist()
+    
+    # Set default values only for columns that actually exist
+    default_categorical = []
+    for col in ['location', 'device', 'merchant_category', 'payment_method']:
+        if col in available_categorical:
+            default_categorical.append(col)
+    
     categorical_columns = st.multiselect(
         "🏷️ Select Categorical Columns",
-        df.select_dtypes(include=['object']).columns.tolist(),
-        default=['location', 'device', 'merchant_category', 'payment_method'] if all(col in df.columns for col in ['location', 'device']) else ['location', 'device'] if 'location' in df.columns and 'device' in df.columns else []
+        available_categorical,
+        default=default_categorical
     )
+    
+    # Get available numeric columns
+    available_numeric = df.select_dtypes(include=[np.number]).columns.tolist()
+    
+    # Set default values only for columns that actually exist
+    default_numeric = []
+    for col in ['amount', 'is_international', 'previous_transactions', 'average_spend', 'account_age_days', 'suspicious_keyword']:
+        if col in available_numeric:
+            default_numeric.append(col)
     
     numeric_columns = st.multiselect(
         "🔢 Select Numeric Columns for Normalization",
-        df.select_dtypes(include=[np.number]).columns.tolist(),
-        default=['amount', 'is_international', 'previous_transactions', 'average_spend', 'account_age_days', 'suspicious_keyword'] if all(col in df.columns for col in ['amount', 'is_international']) else ['amount'] if 'amount' in df.columns else []
+        available_numeric,
+        default=default_numeric
     )
     
     if st.button("🚀 Preprocess Data", key="preprocess"):
@@ -634,10 +679,24 @@ def model_training():
                         df_cleaned, numeric_columns
                     )
                 
+                # Additional NaN handling - ensure no NaN values remain
+                df_cleaned = df_cleaned.fillna(0)
+                
+                # Check for any remaining NaN values
+                if df_cleaned.isnull().any().any():
+                    st.warning("⚠️ Some NaN values still present, filling with 0")
+                    df_cleaned = df_cleaned.fillna(0)
+                
                 # Prepare training data
                 X_train, X_test, y_train, y_test = st.session_state.preprocessor.prepare_training_data(
                     df_cleaned
                 )
+                
+                # Final check for NaN in training data
+                if X_train.isnull().any().any():
+                    st.warning("⚠️ NaN values found in training data, filling with 0")
+                    X_train = X_train.fillna(0)
+                    X_test = X_test.fillna(0)
                 
                 st.session_state.X_train = X_train
                 st.session_state.X_test = X_test
@@ -650,6 +709,7 @@ def model_training():
                 </div>
                 """, unsafe_allow_html=True)
                 st.info(f"📊 Training set: {X_train.shape}, Test set: {X_test.shape}")
+                st.info(f"✅ No NaN values in training data: {not X_train.isnull().any().any()}")
                 
             except Exception as e:
                 st.error(f"❌ Error during preprocessing: {e}")

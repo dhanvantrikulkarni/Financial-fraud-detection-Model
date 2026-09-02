@@ -35,6 +35,11 @@ class SupervisedFraudDetector:
     def train_logistic_regression(self, X_train, y_train, **params):
         logger.info("Training Logistic Regression model")
         
+        # Handle NaN values
+        if X_train.isnull().any().any():
+            logger.warning("NaN values found in X_train, filling with 0")
+            X_train = X_train.fillna(0)
+        
         default_params = {
             'random_state': 42,
             'max_iter': 1000,
@@ -51,6 +56,11 @@ class SupervisedFraudDetector:
     
     def train_random_forest(self, X_train, y_train, **params):
         logger.info("Training Random Forest model")
+        
+        # Handle NaN values
+        if X_train.isnull().any().any():
+            logger.warning("NaN values found in X_train, filling with 0")
+            X_train = X_train.fillna(0)
         
         default_params = {
             'n_estimators': 100,
@@ -83,6 +93,11 @@ class SupervisedFraudDetector:
         }
         default_params.update(params)
         
+        # Handle NaN values
+        if X_train.isnull().any().any():
+            logger.warning("NaN values found in X_train, filling with 0")
+            X_train = X_train.fillna(0)
+        
         model = xgb.XGBClassifier(**default_params)
         model.fit(X_train, y_train)
         
@@ -104,6 +119,11 @@ class SupervisedFraudDetector:
             'verbose': -1
         }
         default_params.update(params)
+        
+        # Handle NaN values
+        if X_train.isnull().any().any():
+            logger.warning("NaN values found in X_train, filling with 0")
+            X_train = X_train.fillna(0)
         
         model = lgb.LGBMClassifier(**default_params)
         model.fit(X_train, y_train)

@@ -81,6 +81,12 @@ def main():
     if numeric_columns:
         df = preprocessor.normalize_features(df, numeric_columns)
     
+    # Additional NaN handling - ensure no NaN values remain
+    df = df.fillna(0)
+    if df.isnull().any().any():
+        logger.warning("NaN values still present after initial fill, filling again")
+        df = df.fillna(0)
+    
     # Prepare training data
     X_train, X_test, y_train, y_test = preprocessor.prepare_training_data(df)
     
