@@ -1,0 +1,34 @@
+{
+  "database": {
+    "path": "fraud_detection.db",
+    "table_name": "transactions"
+  },
+  "model": {
+    "default_model": "logistic_regression",
+    "model_dir": "models",
+    "retrain_interval": 86400
+  },
+  "streaming": {
+    "kafka": {
+      "bootstrap_servers": ["localhost:9092"],
+      "transaction_topic": "transaction_stream",
+      "alert_topic": "fraud_alerts"
+    },
+    "spark": {
+      "app_name": "FraudDetectionSystem",
+      "input_path": "streaming_input/",
+      "output_path": "streaming_output/"
+    }
+  },
+  "preprocessing": {
+    "categorical_columns": ["location", "device"],
+    "numeric_columns": ["amount", "hour", "day_of_week", "is_weekend"],
+    "handle_missing": true,
+    "normalize_features": true
+  },
+  "dashboard": {
+    "title": "Financial Fraud Detection Dashboard",
+    "port": 8501,
+    "refresh_interval": 5
+  }
+}
