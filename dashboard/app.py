@@ -576,6 +576,24 @@ def fraud_alerts():
     
     try:
         conn = sqlite3.connect("fraud_detection.db")
+        
+        # Create fraud_alerts table if it doesn't exist
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS fraud_alerts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                transaction_id TEXT,
+                amount REAL,
+                location TEXT,
+                fraud_probability REAL,
+                alert_timestamp TEXT,
+                model_used TEXT,
+                risk_level TEXT,
+                notified BOOLEAN DEFAULT 0
+            )
+        """)
+        conn.commit()
+        
         alerts_df = pd.read_sql("SELECT * FROM fraud_alerts ORDER BY alert_timestamp DESC LIMIT 100", conn)
         conn.close()
     except Exception as e:
