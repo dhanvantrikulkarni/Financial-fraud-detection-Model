@@ -137,6 +137,34 @@ def load_data_from_db(db_path="fraud_detection.db"):
         conn = sqlite3.connect(db_path)
         df = pd.read_sql("SELECT * FROM transactions", conn)
         conn.close()
+        
+        # Normalize column names to match expected format
+        column_mapping = {
+            'Transaction_ID': 'transaction_id',
+            'Customer_ID': 'customer_id',
+            'Transaction_Date': 'timestamp',
+            'Transaction_Amount': 'amount',
+            'Merchant_Category': 'merchant_category',
+            'Payment_Method': 'payment_method',
+            'Device_Type': 'device',
+            'Location': 'location',
+            'Is_International': 'is_international',
+            'Previous_Transactions': 'previous_transactions',
+            'Average_Spend': 'average_spend',
+            'Account_Age_Days': 'account_age_days',
+            'Suspicious_Keyword': 'suspicious_keyword',
+            'Fraudulent': 'is_fraud'
+        }
+        
+        # Apply column mapping if columns exist
+        mapping_to_apply = {}
+        for old_col, new_col in column_mapping.items():
+            if old_col in df.columns:
+                mapping_to_apply[old_col] = new_col
+        
+        if mapping_to_apply:
+            df = df.rename(columns=mapping_to_apply)
+        
         return df
     except Exception as e:
         st.error(f"Error loading data from database: {e}")
@@ -203,9 +231,9 @@ def dashboard_overview():
     col1, col2, col3, col4 = st.columns(4)
     
     total_transactions = len(df)
-    fraud_count = df['is_fraud'].sum() if 'is_fraud' in df.columns else 0
+    fraud_count = df['is_fraud'].sum() if 'is_fraud' in df.columns else df['Fraudulent'].sum() if 'Fraudulent' in df.columns else 0
     fraud_rate = (fraud_count / total_transactions * 100) if total_transactions > 0 else 0
-    total_amount = df['amount'].sum() if 'amount' in df.columns and pd.api.types.is_numeric_dtype(df['amount']) else 0
+    total_amount = df['amount'].sum() if 'amount' in df.columns and pd.api.types.is_numeric_dtype(df['amount']) else df['Transaction_Amount'].sum() if 'Transaction_Amount' in df.columns and pd.api.types.is_numeric_dtype(df['Transaction_Amount']) else 0
     
     with col1:
         st.markdown(f"""
@@ -261,9 +289,12 @@ def dashboard_overview():
         st.plotly_chart(fig_pie, use_container_width=True)
     
     with col2:
-        if 'amount' in df.columns and 'is_fraud' in df.columns and pd.api.types.is_numeric_dtype(df['amount']):
+        amount_col = 'amount' if 'amount' in df.columns else 'Transaction_Amount' if 'Transaction_Amount' in df.columns else None
+        fraud_col = 'is_fraud' if 'is_fraud' in df.columns else 'Fraudulent' if 'Fraudulent' in df.columns else None
+        
+        if amount_col and fraud_col and pd.api.types.is_numeric_dtype(df[amount_col]):
             st.subheader("💰 Transaction Amount Distribution")
-            fig_hist = px.histogram(df, x='amount', color='is_fraud',
+            fig_hist = px.histogram(df, x=amount_col, color=fraud_col,
                                    color_discrete_map={0: '#2ecc71', 1: '#e74c3c'},
                                    nbins=50, title="Amount Distribution by Fraud Status",
                                    marginal='box')
@@ -277,12 +308,21 @@ def dashboard_overview():
             st.info("Amount distribution chart not available - missing required columns")
     
     # Time-based analysis with enhanced visualization
-    if 'timestamp' in df.columns and 'is_fraud' in df.columns:
+    timestamp_col = 'timestamp' if 'timestamp' in df.columns else 'Transaction_Date' if 'Transaction_Date' in df.columns else None
+    fraud_col = 'is_fraud' if 'is_fraud' in df.columns else 'Fraudulent' if 'Fraudulent' in df.columns else None
+    
+    if timestamp_col and fraud_col:
         st.subheader("📅 Transaction Timeline")
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
-        df['date'] = df['timestamp'].dt.date
+        try:
+            df[timestamp_col] = pd.to_datetime(df[timestamp_col], format='%d-%m-%Y %H:%M')
+        except:
+            try:
+                df[timestamp_col] = pd.to_datetime(df[timestamp_col], format='%m-%d-%Y %H:%M')
+            except:
+                df[timestamp_col] = pd.to_datetime(df[timestamp_col], format='mixed')
+        df['date'] = df[timestamp_col].dt.date
         daily_transactions = df.groupby('date').size().reset_index(name='count')
-        daily_fraud = df[df['is_fraud'] == 1].groupby('date').size().reset_index(name='fraud_count')
+        daily_fraud = df[df[fraud_col] == 1].groupby('date').size().reset_index(name='fraud_count')
         
         fig_time = go.Figure()
         fig_time.add_trace(go.Scatter(
@@ -315,17 +355,18 @@ def dashboard_overview():
 def model_performance():
     st.header("📈 Model Performance")
     
-    if not st.session_state.model_trained:
-        st.warning("Models not trained yet. Please train models first in the Model Training section.")
-        return
-    
     # Load model evaluation results
     try:
         supervised_results = joblib.load('models/supervised_results.pkl')
+        st.session_state.model_trained = True
+    except:
+        st.warning("Model evaluation results not found. Please train models first in the Model Training section.")
+        return
+    
+    try:
         unsupervised_results = joblib.load('models/unsupervised_results.pkl')
     except:
-        st.error("Model evaluation results not found. Please train models first.")
-        return
+        unsupervised_results = None
     
     # Supervised Model Performance
     st.subheader("🤖 Supervised Learning Models")
@@ -341,7 +382,7 @@ def model_performance():
                      color=model_names,
                      color_discrete_sequence=colors,
                      text=auc_scores,
-                     text_template='%{y:.3f}')
+                     text_auto='.3f')
     fig_auc.update_traces(textposition='outside')
     fig_auc.update_layout(
         paper_bgcolor='rgba(0,0,0,0)',
@@ -391,7 +432,7 @@ def model_performance():
                                  color=unsupervised_names,
                                  color_discrete_sequence=unsupervised_colors,
                                  text=unsupervised_auc,
-                                 text_template='%{y:.3f}')
+                                 text_auto='.3f')
         fig_unsupervised.update_traces(textposition='outside')
         fig_unsupervised.update_layout(
             paper_bgcolor='rgba(0,0,0,0)',
@@ -418,8 +459,9 @@ def transaction_analysis():
     col1, col2, col3 = st.columns(3)
     
     # Ensure amount column exists and is numeric
-    if 'amount' in df.columns and pd.api.types.is_numeric_dtype(df['amount']):
-        max_amount_value = float(df['amount'].max())
+    amount_col = 'amount' if 'amount' in df.columns else 'Transaction_Amount' if 'Transaction_Amount' in df.columns else None
+    if amount_col and pd.api.types.is_numeric_dtype(df[amount_col]):
+        max_amount_value = float(df[amount_col].max())
         min_amount_value = 0.0
     else:
         max_amount_value = 1000.0
@@ -435,16 +477,17 @@ def transaction_analysis():
         fraud_filter = st.selectbox("🚨 Filter by Fraud Status", ["All", "Legitimate", "Fraudulent"])
     
     # Apply filters - only if amount column exists
-    if 'amount' in df.columns and pd.api.types.is_numeric_dtype(df['amount']):
-        filtered_df = df[(df['amount'] >= min_amount) & (df['amount'] <= max_amount)]
+    if amount_col and pd.api.types.is_numeric_dtype(df[amount_col]):
+        filtered_df = df[(df[amount_col] >= min_amount) & (df[amount_col] <= max_amount)]
     else:
         filtered_df = df.copy()
     
-    if 'is_fraud' in df.columns:
+    fraud_col = 'is_fraud' if 'is_fraud' in df.columns else 'Fraudulent' if 'Fraudulent' in df.columns else None
+    if fraud_col:
         if fraud_filter == "Legitimate":
-            filtered_df = filtered_df[filtered_df['is_fraud'] == 0]
+            filtered_df = filtered_df[filtered_df[fraud_col] == 0]
         elif fraud_filter == "Fraudulent":
-            filtered_df = filtered_df[filtered_df['is_fraud'] == 1]
+            filtered_df = filtered_df[filtered_df[fraud_col] == 1]
     
     # Display results with colored indicators
     st.subheader(f"📋 Filtered Transactions ({len(filtered_df)} records)")
@@ -455,15 +498,20 @@ def transaction_analysis():
             color = '#ff6b6b' if val == 1 else '#2ecc71'
             return f'background-color: {color}'
         
-        styled_df = filtered_df.head(100).style.applymap(color_fraud_status, subset=['is_fraud'])
-        st.dataframe(styled_df)
+        fraud_col = 'is_fraud' if 'is_fraud' in filtered_df.columns else 'Fraudulent' if 'Fraudulent' in filtered_df.columns else None
+        if fraud_col:
+            styled_df = filtered_df.head(100).style.map(color_fraud_status, subset=[fraud_col])
+            st.dataframe(styled_df)
+        else:
+            st.dataframe(filtered_df.head(100))
     else:
         st.info("No transactions match the current filters.")
     
     # Location analysis with enhanced visualization
-    if 'location' in df.columns:
+    location_col = 'location' if 'location' in df.columns else 'Location' if 'Location' in df.columns else None
+    if location_col:
         st.subheader("🌍 Transactions by Location")
-        location_counts = df['location'].value_counts().head(20)
+        location_counts = df[location_col].value_counts().head(20)
         
         if len(location_counts) > 0:
             # Colorful bar chart
@@ -473,8 +521,7 @@ def transaction_analysis():
                                 labels={'x': 'Location', 'y': 'Transaction Count'},
                                 color=location_counts.values,
                                 color_continuous_scale='Viridis',
-                                text=location_counts.values,
-                                text_template='%{y}')
+                                text_auto=True)
             fig_location.update_traces(textposition='outside')
             fig_location.update_layout(
                 paper_bgcolor='rgba(0,0,0,0)',
@@ -487,9 +534,10 @@ def transaction_analysis():
             st.info("No location data available")
     
     # Device analysis with enhanced visualization
-    if 'device' in df.columns:
+    device_col = 'device' if 'device' in df.columns else 'Device_Type' if 'Device_Type' in df.columns else None
+    if device_col:
         st.subheader("📱 Transactions by Device")
-        device_counts = df['device'].value_counts()
+        device_counts = df[device_col].value_counts()
         
         if len(device_counts) > 0:
             # Colorful pie chart
@@ -509,13 +557,13 @@ def transaction_analysis():
             st.info("No device data available")
     
     # Interactive amount range visualization - only if amount column exists
-    if 'amount' in df.columns and 'is_fraud' in df.columns and pd.api.types.is_numeric_dtype(df['amount']):
+    if amount_col and fraud_col and pd.api.types.is_numeric_dtype(df[amount_col]):
         st.subheader("💵 Amount Range Analysis")
-        fig_amount = px.box(df, x='is_fraud', y='amount', 
-                           color='is_fraud',
+        fig_amount = px.box(df, x=fraud_col, y=amount_col,
+                           color=fraud_col,
                            color_discrete_map={0: '#2ecc71', 1: '#e74c3c'},
                            title='Amount Distribution by Fraud Status',
-                           labels={'is_fraud': 'Fraud Status', 'amount': 'Transaction Amount'})
+                           labels={fraud_col: 'Fraud Status', amount_col: 'Transaction Amount'})
         fig_amount.update_layout(
             paper_bgcolor='rgba(0,0,0,0)',
             plot_bgcolor='rgba(0,0,0,0)',
@@ -528,7 +576,7 @@ def fraud_alerts():
     
     try:
         conn = sqlite3.connect("fraud_detection.db")
-        alerts_df = pd.read_sql("SELECT * FROM fraud_alerts ORDER BY timestamp DESC LIMIT 100", conn)
+        alerts_df = pd.read_sql("SELECT * FROM fraud_alerts ORDER BY alert_timestamp DESC LIMIT 100", conn)
         conn.close()
     except:
         st.warning("No fraud alerts found in database.")
@@ -574,7 +622,8 @@ def fraud_alerts():
         risk_level = "🔴 HIGH" if row['fraud_probability'] > 0.9 else "🟡 MEDIUM" if row['fraud_probability'] > 0.7 else "🟢 LOW"
         risk_color = "#ff6b6b" if row['fraud_probability'] > 0.9 else "#feca57" if row['fraud_probability'] > 0.7 else "#2ecc71"
         
-        with st.expander(f"Alert {row['transaction_id']} - {risk_level} - {row['timestamp']}"):
+        timestamp_display = row.get('alert_timestamp', row.get('timestamp', 'N/A'))
+        with st.expander(f"Alert {row['transaction_id']} - {risk_level} - {timestamp_display}"):
             st.markdown(f"""
             <div style="background: linear-gradient(135deg, {risk_color}22 0%, {risk_color}44 100%); 
                         padding: 1rem; border-radius: 10px; border-left: 4px solid {risk_color};">
@@ -592,11 +641,11 @@ def fraud_alerts():
     
     # Alert timeline with enhanced visualization
     st.subheader("📊 Alert Timeline")
-    if 'timestamp' in alerts_df.columns:
-        alerts_df['timestamp'] = pd.to_datetime(alerts_df['timestamp'])
-        alerts_by_hour = alerts_df.groupby(alerts_df['timestamp'].dt.hour).size()
+    if 'alert_timestamp' in alerts_df.columns:
+        alerts_df['alert_timestamp'] = pd.to_datetime(alerts_df['alert_timestamp'])
+        alerts_by_hour = alerts_df.groupby(alerts_df['alert_timestamp'].dt.hour).size()
     else:
-        st.info("Timeline not available - timestamp column missing")
+        st.info("Timeline not available - alert_timestamp column missing")
         alerts_by_hour = pd.Series()
     
     if len(alerts_by_hour) > 0:

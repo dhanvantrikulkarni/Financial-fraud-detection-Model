@@ -9,7 +9,7 @@ lightgbm>=4.0.0
 tensorflow>=2.13.0
 
 # Data processing
-sqlite3
+# sqlite3 is built-in Python module
 
 # Real-time streaming
 kafka-python>=2.0.0
