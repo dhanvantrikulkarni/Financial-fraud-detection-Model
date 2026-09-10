@@ -57,6 +57,35 @@ def main():
         logger.info(f"Loading data from {args.data_path}")
         df = preprocessor.load_data(args.data_path)
     
+    # Normalize column names if loading from database with original names
+    if not args.generate_data:
+        column_mapping = {
+            'Transaction_ID': 'transaction_id',
+            'Customer_ID': 'customer_id', 
+            'Transaction_Date': 'timestamp',
+            'Transaction_Amount': 'amount',
+            'Merchant_Category': 'merchant_category',
+            'Payment_Method': 'payment_method',
+            'Device_Type': 'device',
+            'Location': 'location',
+            'Is_International': 'is_international',
+            'Previous_Transactions': 'previous_transactions',
+            'Average_Spend': 'average_spend',
+            'Account_Age_Days': 'account_age_days',
+            'Suspicious_Keyword': 'suspicious_keyword',
+            'Fraudulent': 'is_fraud'
+        }
+        
+        # Apply column mapping if columns exist
+        mapping_to_apply = {}
+        for old_col, new_col in column_mapping.items():
+            if old_col in df.columns:
+                mapping_to_apply[old_col] = new_col
+        
+        if mapping_to_apply:
+            df = df.rename(columns=mapping_to_apply)
+            logger.info(f"Normalized column names: {mapping_to_apply}")
+    
     # Preprocess data
     logger.info("Preprocessing data...")
     

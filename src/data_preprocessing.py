@@ -99,7 +99,16 @@ class DataPreprocessor:
                 self.label_encoders[col] = LabelEncoder()
                 df[col] = self.label_encoders[col].fit_transform(df[col].astype(str))
             else:
-                df[col] = self.label_encoders[col].transform(df[col].astype(str))
+                # Handle unseen labels by re-fitting the encoder with new data
+                try:
+                    df[col] = self.label_encoders[col].transform(df[col].astype(str))
+                except ValueError as e:
+                    if "previously unseen labels" in str(e):
+                        logger.warning(f"Unseen labels detected in {col}, re-fitting encoder")
+                        self.label_encoders[col] = LabelEncoder()
+                        df[col] = self.label_encoders[col].fit_transform(df[col].astype(str))
+                    else:
+                        raise
         
         logger.info(f"Categorical features encoded: {categorical_columns}")
         return df
@@ -108,15 +117,23 @@ class DataPreprocessor:
         df = df.copy()
         
         # Extract temporal features if timestamp exists
-        if 'timestamp' in df.columns:
+        timestamp_col = 'timestamp' if 'timestamp' in df.columns else 'Transaction_Date' if 'Transaction_Date' in df.columns else None
+        if timestamp_col:
             # Try different date formats
             try:
-                df['timestamp'] = pd.to_datetime(df['timestamp'], format='%d-%m-%Y %H:%M')
+                df[timestamp_col] = pd.to_datetime(df[timestamp_col], format='%d-%m-%Y %H:%M')
             except:
                 try:
-                    df['timestamp'] = pd.to_datetime(df['timestamp'], format='%m-%d-%Y %H:%M')
+                    df[timestamp_col] = pd.to_datetime(df[timestamp_col], format='%m-%d-%Y %H:%M')
                 except:
-                    df['timestamp'] = pd.to_datetime(df['timestamp'], format='mixed')
+                    try:
+                        df[timestamp_col] = pd.to_datetime(df[timestamp_col], dayfirst=True)
+                    except:
+                        df[timestamp_col] = pd.to_datetime(df[timestamp_col], format='mixed')
+            
+            # Rename to standardized 'timestamp' if needed
+            if timestamp_col != 'timestamp':
+                df['timestamp'] = df[timestamp_col]
             
             df['hour'] = df['timestamp'].dt.hour
             df['day_of_week'] = df['timestamp'].dt.dayofweek
@@ -198,16 +215,40 @@ class DataPreprocessor:
         if target_column not in df.columns:
             raise ValueError(f"Target column '{target_column}' not found in dataframe. Available columns: {df.columns.tolist()}")
         
-        # Remove non-feature columns
+        # Remove non-feature columns (include both normalized and original names)
         columns_to_drop = [target_column]
-        non_feature_columns = ['transaction_id', 'customer_id', 'timestamp']
+        non_feature_columns = [
+            'transaction_id', 'customer_id', 'timestamp',  # normalized names
+            'Transaction_ID', 'Customer_ID', 'Transaction_Date'  # original names
+        ]
         for col in non_feature_columns:
             if col in df.columns:
                 columns_to_drop.append(col)
         
+        # Also drop any remaining string/object columns that might be IDs
+        for col in df.columns:
+            if col not in columns_to_drop and df[col].dtype == 'object':
+                # Check if this looks like an ID column (high cardinality, mostly unique)
+                if df[col].nunique() > len(df) * 0.9:  # More than 90% unique values
+                    columns_to_drop.append(col)
+                    logger.info(f"Dropping potential ID column: {col}")
+        
         # Separate features and target
         X = df.drop(columns=columns_to_drop)
         y = df[target_column]
+        
+        # Ensure all features are numeric
+        for col in X.columns:
+            if X[col].dtype == 'object':
+                logger.warning(f"Column {col} is still object type, attempting conversion")
+                try:
+                    X[col] = pd.to_numeric(X[col], errors='coerce')
+                except:
+                    logger.error(f"Could not convert column {col} to numeric, dropping it")
+                    X = X.drop(columns=[col])
+        
+        # Fill any NaN values that resulted from conversion
+        X = X.fillna(0)
         
         # Split the data
         X_train, X_test, y_train, y_test = train_test_split(
